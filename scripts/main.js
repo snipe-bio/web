@@ -101,6 +101,7 @@ async function handleFileData(file, fileType) {
 }
 
 // Function to setup Dropzone for different file types
+// Function to setup Dropzone for different file types
 function setupDropzone(elementId, fileType) {
     return new Dropzone(elementId, {
         url: '#', // Dummy action as no server interaction is required
@@ -108,35 +109,49 @@ function setupDropzone(elementId, fileType) {
         clickable: true,
         previewsContainer: false, // Disable preview
         acceptedFiles: '.sig,.zip', // Accept .sig and .zip files
-        init: function () {
-            this.on('addedfile', async function (file) {
+        init: function() {
+            this.on('addedfile', async function(file) {
                 if (fileType === 'genome' && this.files.length > 1) {
                     this.removeFile(this.files[0]); // Keep only the most recent file if only one is allowed
                 }
 
-                const fileRowContainer = document.querySelector(elementId + ' .file-list');
-                if (fileRowContainer) {
-                    const fileRow = document.createElement('div');
-                    fileRow.className = 'file-info row';
-                    fileRow.innerHTML = `<div class="col-8">${file.name} - ${(file.size / 1024).toFixed(2)} KB</div>
-                                         <div class="col-4 text-right"><button class="btn btn-danger btn-sm remove-file">Remove</button></div>`;
+                // Create a unique identifier for the file
+                const fileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-                    fileRow.querySelector('.remove-file').addEventListener('click', () => {
-                        this.removeFile(file);
-                        fileRowContainer.removeChild(fileRow);
-                        if (fileType === 'sample') {
-                            sampleFiles = sampleFiles.filter(f => f.name !== file.name);
-                        } else if (fileType === 'genome') {
-                            sampleFiles = sampleFiles.filter(f => !(f.type === 'genome' && f.name === file.name));
-                        } else if (fileType === 'amplicon') {
-                            sampleFiles = sampleFiles.filter(f => !(f.type === 'amplicon' && f.name === file.name));
-                        }
-                        // Remove corresponding table row
-                        removeTableRow(file.name);
-                    });
+                // Create file entry with progress bar
+                const uploadedFilesContainer = document.getElementById('uploaded-files');
+                const fileRow = document.createElement('div');
+                fileRow.className = 'file-info row mb-2';
+                fileRow.id = fileId;
+                fileRow.innerHTML = `
+                    <div class="col-6">${file.name} - ${(file.size / 1024).toFixed(2)} KB</div>
+                    <div class="col-4">
+                        <div class="progress">
+                            <div id="${fileId}-progress" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                        </div>
+                    </div>
+                    <div class="col-2 text-right">
+                        <button class="btn btn-danger btn-sm remove-file">Remove</button>
+                    </div>
+                `;
 
-                    fileRowContainer.appendChild(fileRow);
-                }
+                // Append the file row to the container
+                uploadedFilesContainer.appendChild(fileRow);
+
+                // Handle remove button
+                fileRow.querySelector('.remove-file').addEventListener('click', () => {
+                    this.removeFile(file);
+                    uploadedFilesContainer.removeChild(fileRow);
+                    if (fileType === 'sample') {
+                        sampleFiles = sampleFiles.filter(f => f.name !== file.name);
+                    } else if (fileType === 'genome') {
+                        sampleFiles = sampleFiles.filter(f => !(f.type === 'genome' && f.name === file.name));
+                    } else if (fileType === 'amplicon') {
+                        sampleFiles = sampleFiles.filter(f => !(f.type === 'amplicon' && f.name === file.name));
+                    }
+                    // Remove corresponding table row
+                    removeTableRow(file.name);
+                });
 
                 // Handle file data
                 if (file.type === 'application/zip') {
@@ -150,11 +165,10 @@ function setupDropzone(elementId, fileType) {
                             if (!zipEntry.dir && zipEntry.name.endsWith('.sig')) {
                                 const sigContent = await zipEntry.async("string");
                                 console.log(`Extracted ${zipEntry.name}:`);
-                                // console.log(sigContent);
                                 // Store extracted .sig files as samples
                                 sampleFiles.push({ name: zipEntry.name, content: sigContent, type: 'sample' });
                                 // Push the processing promise to the array
-                                processingPromises.push(processSignature(zipEntry.name, sigContent));
+                                processingPromises.push(processSignature(zipEntry.name, sigContent, fileId));
                             }
                         });
 
@@ -169,6 +183,8 @@ function setupDropzone(elementId, fileType) {
                     } catch (error) {
                         console.error('Error extracting ZIP file:', error);
                         showLoadingAnimation(false); // Ensure loader is hidden on error
+                        // Update progress bar to indicate failure
+                        updateProgressBar(fileId, 100, 'Failed', 'bg-danger');
                     }
                 } else if (file.name.endsWith('.sig')) {
                     // Handle individual .sig files
@@ -178,13 +194,19 @@ function setupDropzone(elementId, fileType) {
                     // Store sample files
                     sampleFiles.push({ name: file.name, content: content, type: 'sample' });
                     // Push the processing promise to the array
-                    const processingPromise = processSignature(file.name, content);
+                    const processingPromise = processSignature(file.name, content, fileId);
 
                     // Show loading modal
                     showLoadingAnimation(true);
 
                     // Await the processing
-                    await processingPromise;
+                    try {
+                        await processingPromise;
+                    } catch (error) {
+                        console.error(`Error processing ${file.name}:`, error);
+                        // Update progress bar to indicate failure
+                        updateProgressBar(fileId, 100, 'Failed', 'bg-danger');
+                    }
 
                     // Hide loading modal after processing
                     showLoadingAnimation(false);
@@ -221,22 +243,30 @@ function removeTableRow(sampleName) {
 }
 
 // Function to process a single signature file
-async function processSignature(fileName, sigContent) {
+async function processSignature(fileName, sigContent, fileId) {
     const pyodide = await pyodideReady;
     try {
+        // Update progress to 10%
+        updateProgressBar(fileId, 10, 'Starting...', 'bg-info');
+
         // Check if genome and y_chr files are loaded from window
         if (!window.loadedGenomeSig) {
             alert('Genome file is not loaded. Please load genome data first.');
+            updateProgressBar(fileId, 100, 'Failed: Genome not loaded', 'bg-danger');
             return;
         }
 
         if (!window.loadedYchrSig) {
             alert('Y Chromosome file is not loaded. Please load Y Chromosome data first.');
+            updateProgressBar(fileId, 100, 'Failed: Y Chromosome not loaded', 'bg-danger');
             return;
         }
 
         // console log sigContent
         console.log(`Processing ${fileName}:`);
+
+        // Update progress to 20%
+        updateProgressBar(fileId, 20, 'Fetching specific chromosomes...', 'bg-info');
 
         // Get loaded genome and y_chr content
         const genomeContent = window.loadedGenomeSig;
@@ -274,6 +304,9 @@ async function processSignature(fileName, sigContent) {
         // Await all chromosome fetches
         await Promise.all(chrPromises);
 
+        // Update progress to 40%
+        updateProgressBar(fileId, 40, 'Preparing data for processing...', 'bg-info');
+
         // Load amplicon file if available from window
         let ampliconContent = null;
         if (window.loadedAmpliconSig) {
@@ -291,6 +324,9 @@ async function processSignature(fileName, sigContent) {
 
         // set signature file name
         pyodide.globals.set('fileName', fileName);
+
+        // Update progress to 60%
+        updateProgressBar(fileId, 60, 'Running Python processing...', 'bg-info');
 
         // Run Python processing
         const pythonCode = `
@@ -363,16 +399,21 @@ result_json
         const resultObj = result.toJs()
         // console.log('Sample result:', resultObj); // Debugging line
 
+        // Update progress to 80%
+        updateProgressBar(fileId, 80, 'Displaying results...', 'bg-info');
+
         // Display the result in the table
         displayResultsInTable(resultObj);
+
+        // Update progress to 100%
+        updateProgressBar(fileId, 100, 'Completed', 'bg-success');
     } catch (error) {
         console.error(`Error processing ${fileName}:`, error);
+        // Update progress bar to indicate failure
+        updateProgressBar(fileId, 100, 'Failed', 'bg-danger');
     }
 }
 
-
-
-// Function to display results in the table
 // Function to display results in the table
 function displayResultsInTable(result) {
     const resultsTableBody = document.getElementById('resultsTableBody');
@@ -435,7 +476,7 @@ function exportTableToTSV() {
 }
 
 // Add export button functionality
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', function() {
     const exportButton = document.getElementById('exportButton');
     exportButton.addEventListener('click', exportTableToTSV);
 });
@@ -623,4 +664,23 @@ function getYchrContent() {
 function getAmpliconContent() {
     const ampliconFileObj = sampleFiles.find(f => f.type === 'amplicon');
     return ampliconFileObj ? ampliconFileObj.content : null;
-} 
+}
+
+/**
+ * Updates the progress bar for a specific file.
+ * @param {string} fileId - The unique identifier for the file.
+ * @param {number} percentage - The completion percentage (0-100).
+ * @param {string} statusText - The status text to display.
+ * @param {string} [additionalClass] - Optional Bootstrap class for the progress bar (e.g., 'bg-success').
+ */
+function updateProgressBar(fileId, percentage, statusText, additionalClass = '') {
+    const progressBar = document.getElementById(`${fileId}-progress`);
+    if (progressBar) {
+        progressBar.style.width = `${percentage}%`;
+        progressBar.setAttribute('aria-valuenow', percentage);
+        progressBar.textContent = `${percentage}% - ${statusText}`;
+        if (additionalClass) {
+            progressBar.className = `progress-bar ${additionalClass}`;
+        }
+    }
+}

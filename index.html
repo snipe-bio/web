@@ -143,6 +143,15 @@
         table.table-striped tbody tr:nth-of-type(even) {
             background-color: #ffffff;
         }
+
+        .progress {
+            height: 20px;
+        }
+        
+        .progress-bar {
+            font-size: 0.8rem;
+            line-height: 20px;
+        }
     </style>
 </head>
 
@@ -216,6 +225,10 @@
             <form id="sample-upload-form" class="dropzone">
                 <div class="dz-message">Drop files here or click to upload.</div>
             </form>
+            <!-- Container for Uploaded Files and Their Progress -->
+            <div id="uploaded-files" class="mt-3">
+                <!-- Individual file progress will be appended here -->
+            </div>
         </div>
 
 
