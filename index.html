@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snipe SRA Exploration Dashboard</title>
+
+    <!-- Bootstrap 4 CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+
+    <!-- Dropzone CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.0/min/dropzone.min.css">
+
+    <!-- Custom Styles -->
+    <link href="styles/main.css" rel="stylesheet">
+
+    <!-- Required Scripts -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
+    <!-- Dropzone JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.0/min/dropzone.min.js"></script>
+
+    <!-- JSZip for ZIP file handling -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <!-- Pyodide for Python integration -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+
+    <!-- Plotly for plotting -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+    <!-- Custom Script -->
+    <script src="./scripts/main.js" defer></script>
+
+    <style>
+        /* Custom Styles */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 1200px;
+            margin: 2rem auto;
+        }
+
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 2rem;
+            font-size: 2.5rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .control-group label {
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+            color: #34495e;
+        }
+
+        .dropzone {
+            border: 2px dashed #3498db;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            color: #3498db;
+            cursor: pointer;
+        }
+
+        .file-info {
+            margin-top: 10px;
+        }
+
+        .file-info .remove-file {
+            margin-left: 10px;
+            color: red;
+            cursor: pointer;
+        }
+
+        #loadingAnimation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .loader {
+            border: 12px solid #f3f3f3;
+            border-top: 12px solid #3498db;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Footer Styling */
+        footer.footer {
+            background-color: #f8f9fa;
+            padding: 1rem 0;
+            margin-top: 2rem;
+            text-align: center;
+            color: #6c757d;
+        }
+
+        /* Enhanced Table Styling */
+        table.table-striped thead {
+            background-color: #3498db;
+            color: white;
+        }
+
+        table.table-striped tbody tr:nth-of-type(odd) {
+            background-color: #f9f9f9;
+        }
+
+        table.table-striped tbody tr:nth-of-type(even) {
+            background-color: #ffffff;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Help Modal -->
+    <div id="help-modal" class="modal" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Snipe Metrics Description</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>Here you can describe the metrics used in Snipe...</p>
+                    <!-- Add more detailed descriptions as needed -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+        <h1>Snipe SRA Exploration Dashboard</h1>
+
+        <!-- Data Selection Section -->
+        <div id="data-selection-container" class="species-selection">
+            <div class="form-row">
+                <div class="form-group col-md-3">
+                    <label for="species-select">Species:</label>
+                    <select id="species-select" class="form-control">
+                        <option value="" disabled selected>Select Species</option>
+                        <!-- Options will be populated dynamically -->
+                    </select>
+                </div>
+                <div class="form-group col-md-3">
+                    <label for="genome-select">Reference Genome:</label>
+                    <select id="genome-select" class="form-control" disabled>
+                        <option value="" disabled selected>Select Reference Genome</option>
+                        <!-- Options will be populated dynamically -->
+                    </select>
+                </div>
+                <div class="form-group col-md-3">
+                    <label for="ychr-select">Y Chromosome:</label>
+                    <select id="ychr-select" class="form-control" disabled>
+                        <option value="" disabled selected>Select Y Chromosome</option>
+                        <!-- Options will be populated dynamically -->
+                    </select>
+                </div>
+                <div class="form-group col-md-3">
+                    <label for="amplicon-select">Amplicon (Optional):</label>
+                    <select id="amplicon-select" class="form-control" disabled>
+                        <option value="" disabled selected>Select Amplicon (Optional)</option>
+                        <!-- Options will be populated dynamically -->
+                    </select>
+                </div>
+            </div>
+            <button id="load-data-button" class="btn btn-success" disabled>Load Data</button>
+            <div id="log-info" class="log-info mt-3" style="display: none;">
+                <!-- Log information will be displayed here -->
+            </div>
+        </div>
+
+        <!-- File Upload Section -->
+        <div class="mt-4">
+            <h2>Upload Sample Files</h2>
+            <form id="sample-upload-form" class="dropzone">
+                <div class="dz-message">Drop files here or click to upload.</div>
+            </form>
+        </div>
+
+
+        <!-- Results Table -->
+        <!-- Results Table -->
+        <div id="resultsTableContainer" class="mt-4" style="display: none;">
+            <h3>Results</h3>
+            <button id="exportButton" class="btn btn-primary">Export as TSV</button>
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead id="resultsTableHead"></thead>
+                    <tbody id="resultsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+
+        <!-- Loading Animation -->
+        <div id="loadingAnimation" style="display: none;">
+            <div class="loader"></div>
+        </div>
+
+
+</body>
+<!-- Footer -->
+<footer>
+    <p class="text-center">© 2024 Snipe. All rights reserved.</p>
+</footer>
+
+</html>
