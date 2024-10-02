@@ -12,10 +12,10 @@ const speciesData = {
         "genomes": {
             "canfam3.1": {
                 "specific_chrs": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                                 "11", "12", "13", "14", "15", "16", "17", "18",
-                                 "19", "20", "21", "22", "23", "24", "25", "26",
-                                 "27", "28", "29", "30", "31", "32", "33", "34",
-                                 "35", "36", "37", "38", "X", "Y"]
+                    "11", "12", "13", "14", "15", "16", "17", "18",
+                    "19", "20", "21", "22", "23", "24", "25", "26",
+                    "27", "28", "29", "30", "31", "32", "33", "34",
+                    "35", "36", "37", "38", "X", "Y"]
             }
             // Add more genomes as needed
         },
@@ -26,8 +26,8 @@ const speciesData = {
         "genomes": {
             "hg38": {
                 "specific_chrs": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                                 "11", "12", "13", "14", "15", "16", "17", "18",
-                                 "19", "20", "21", "22", "X", "Y"]
+                    "11", "12", "13", "14", "15", "16", "17", "18",
+                    "19", "20", "21", "22", "X", "Y"]
             },
             "other_genome": {
                 "specific_chrs": ["1", "2", "3", "X", "Y"]
@@ -108,8 +108,8 @@ function setupDropzone(elementId, fileType) {
         clickable: true,
         previewsContainer: false, // Disable preview
         acceptedFiles: '.sig,.zip', // Accept .sig and .zip files
-        init: function() {
-            this.on('addedfile', async function(file) {
+        init: function () {
+            this.on('addedfile', async function (file) {
                 if (fileType === 'genome' && this.files.length > 1) {
                     this.removeFile(this.files[0]); // Keep only the most recent file if only one is allowed
                 }
@@ -144,6 +144,8 @@ function setupDropzone(elementId, fileType) {
                     const zip = new JSZip();
                     try {
                         const content = await zip.loadAsync(file);
+                        const processingPromises = []; // Array to hold processing promises
+
                         content.forEach(async (relativePath, zipEntry) => {
                             if (!zipEntry.dir && zipEntry.name.endsWith('.sig')) {
                                 const sigContent = await zipEntry.async("string");
@@ -151,12 +153,22 @@ function setupDropzone(elementId, fileType) {
                                 // console.log(sigContent);
                                 // Store extracted .sig files as samples
                                 sampleFiles.push({ name: zipEntry.name, content: sigContent, type: 'sample' });
-                                // Process the extracted .sig file
-                                await processSignature(zipEntry.name, sigContent);
+                                // Push the processing promise to the array
+                                processingPromises.push(processSignature(zipEntry.name, sigContent));
                             }
                         });
+
+                        // Show loading modal
+                        showLoadingAnimation(true);
+
+                        // Await all processing promises
+                        await Promise.all(processingPromises);
+
+                        // Hide loading modal after processing
+                        showLoadingAnimation(false);
                     } catch (error) {
                         console.error('Error extracting ZIP file:', error);
+                        showLoadingAnimation(false); // Ensure loader is hidden on error
                     }
                 } else if (file.name.endsWith('.sig')) {
                     // Handle individual .sig files
@@ -165,12 +177,21 @@ function setupDropzone(elementId, fileType) {
                     console.log(content);
                     // Store sample files
                     sampleFiles.push({ name: file.name, content: content, type: 'sample' });
-                    // Process the .sig file
-                    await processSignature(file.name, content);
+                    // Push the processing promise to the array
+                    const processingPromise = processSignature(file.name, content);
+
+                    // Show loading modal
+                    showLoadingAnimation(true);
+
+                    // Await the processing
+                    await processingPromise;
+
+                    // Hide loading modal after processing
+                    showLoadingAnimation(false);
                 }
             });
 
-            this.on('removedfile', function(file) {
+            this.on('removedfile', function (file) {
                 if (file.type === 'application/zip') {
                     // Remove extracted files from the list
                     sampleFiles = sampleFiles.filter(sig => !file.name.includes(sig.name));
@@ -199,7 +220,6 @@ function removeTableRow(sampleName) {
     }
 }
 
-// Function to process a single signature file
 // Function to process a single signature file
 async function processSignature(fileName, sigContent) {
     const pyodide = await pyodideReady;
@@ -234,7 +254,7 @@ async function processSignature(fileName, sigContent) {
         specificChrsContent = {};
 
         // Fetch each specific chromosome .sig file
-        for (let chr of specificChrs) {
+        const chrPromises = specificChrs.map(async (chr) => {
             const chrPath = `data/species/${selectedSpecies}/genomes/${selectedGenome}/specific_chrs/${chr}.sig`;
             try {
                 const response = await fetch(chrPath);
@@ -249,7 +269,10 @@ async function processSignature(fileName, sigContent) {
             } catch (error) {
                 console.error(`Error fetching specific chromosome (${chr}):`, error);
             }
-        }
+        });
+
+        // Await all chromosome fetches
+        await Promise.all(chrPromises);
 
         // Load amplicon file if available from window
         let ampliconContent = null;
@@ -266,6 +289,9 @@ async function processSignature(fileName, sigContent) {
         pyodide.globals.set('amplicon_sig_str', JSON.stringify(ampliconContent) || '{}');
         pyodide.globals.set('sample_sig_str', JSON.stringify(sigContent));
 
+        // set signature file name
+        pyodide.globals.set('fileName', fileName);
+
         // Run Python processing
         const pythonCode = `
 import json
@@ -280,15 +306,14 @@ def parse_json_string(json_str):
         print(f"Error decoding JSON: {e}")
         return None
 
-
 result = process_sample(
         snipe_sample=json.dumps((parse_json_string(sample_sig_str))),
         snipe_genome=json.dumps(parse_json_string(genome_sig_str)),
         snipe_amplicon=json.dumps(parse_json_string(amplicon_sig_str)),
         dict_chrs_snipe_sigs=json.dumps(parse_json_string(specific_chrs_sigs)),
-        biosample_id="SRS123456",
-        bioproject_id="PRJNA123456",
-        sample_id="SRR123456",
+        biosample_id=fileName,
+        bioproject_id=fileName,
+        sample_id=fileName,
         assay_type="WGS",
     )
 
@@ -356,17 +381,17 @@ function displayResultsInTable(result) {
     // Get the keys from the result object to dynamically generate the table headers
     const keys = Object.keys(result);
 
-    // Clear existing headers if any
-    resultsTableHead.innerHTML = '';
-
-    // Create table headers dynamically based on the result keys
-    const headerRow = document.createElement('tr');
-    keys.forEach(key => {
-        const headerCell = document.createElement('th');
-        headerCell.textContent = key;
-        headerRow.appendChild(headerCell);
-    });
-    resultsTableHead.appendChild(headerRow);
+    // If headers are not yet created, create them
+    if (resultsTableHead.innerHTML.trim() === '') {
+        // Create table headers dynamically based on the result keys
+        const headerRow = document.createElement('tr');
+        keys.forEach(key => {
+            const headerCell = document.createElement('th');
+            headerCell.textContent = key;
+            headerRow.appendChild(headerCell);
+        });
+        resultsTableHead.appendChild(headerRow);
+    }
 
     // Create a new row for the result
     const row = document.createElement('tr');
@@ -419,7 +444,7 @@ document.addEventListener('click', function (event) {
 
 
 // Add export button functionality
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const exportButton = document.getElementById('exportButton');
     exportButton.addEventListener('click', exportTableToTSV);
 });
@@ -607,4 +632,4 @@ function getYchrContent() {
 function getAmpliconContent() {
     const ampliconFileObj = sampleFiles.find(f => f.type === 'amplicon');
     return ampliconFileObj ? ampliconFileObj.content : null;
-}
+} 
