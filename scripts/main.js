@@ -435,15 +435,6 @@ function exportTableToTSV() {
 }
 
 // Add export button functionality
-document.addEventListener('click', function (event) {
-    if (event.target && event.target.id === 'exportButton') {
-        exportTableToTSV();
-    }
-});
-
-
-
-// Add export button functionality
 document.addEventListener('DOMContentLoaded', function () {
     const exportButton = document.getElementById('exportButton');
     exportButton.addEventListener('click', exportTableToTSV);
