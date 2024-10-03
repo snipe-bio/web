@@ -13,7 +13,7 @@ function initializeWorker() {
     worker = new Worker('scripts/worker.js');
 
     worker.onmessage = function (event) {
-        const { type, fileId, percentage, statusText, result, error, message } = event.data;
+        const { type, fileId, percentage, statusText, result, error, message, fileName } = event.data;
 
         if (type === 'pyodide-ready') {
             console.log('Pyodide is ready in the worker.');
@@ -39,7 +39,7 @@ function initializeWorker() {
         }
         if (type === 'result') {
             if (activeFileIds.has(fileId)) {
-                displayResultsInTable(result, fileId);
+                displayResultsInTable(result, fileId, fileName);
             } else {
                 console.warn(`Received result for inactive fileId: ${fileId}`);
             }
@@ -91,21 +91,31 @@ function showLoadingAnimation(show) {
     loader.style.display = show ? 'flex' : 'none';
 }
 
+// Function to sanitize file names
+function sanitizeFileName(fileName) {
+    return fileName.replace(/[^a-z0-9\-_.]/gi, '_'); // Replace non-alphanumeric characters with '_'
+}
+
 // Function to handle file data based on type
 async function handleFileData(file, fileType) {
     const fileContent = await file.text();
+    const sanitizedFileName = sanitizeFileName(file.name);
+    const uniqueFileName = `${Date.now()}-${sanitizedFileName}`; // Ensure uniqueness
 
     if (fileType === 'sample') {
-        sampleFiles.push({ name: file.name, content: fileContent, type: 'sample' });
+        sampleFiles.push({ name: uniqueFileName, content: fileContent, type: 'sample' });
     } else if (fileType === 'genome') {
         // Only one genome file is allowed; replace if a new one is uploaded
         sampleFiles = sampleFiles.filter(f => f.type !== 'genome');
-        sampleFiles.push({ name: file.name, content: fileContent, type: 'genome' });
+        sampleFiles.push({ name: uniqueFileName, content: fileContent, type: 'genome' });
     } else if (fileType === 'amplicon') {
         // Only one amplicon file is allowed; replace if a new one is uploaded
         sampleFiles = sampleFiles.filter(f => f.type !== 'amplicon');
-        sampleFiles.push({ name: file.name, content: fileContent, type: 'amplicon' });
+        sampleFiles.push({ name: uniqueFileName, content: fileContent, type: 'amplicon' });
     }
+
+    // Update the file object with the unique name
+    file.name = uniqueFileName;
 }
 
 // Function to setup Dropzone for different file types
@@ -121,6 +131,9 @@ function setupDropzone(elementId, fileType) {
                 if (fileType === 'genome' && this.files.length > 1) {
                     this.removeFile(this.files[0]); // Keep only the most recent file if only one is allowed
                 }
+
+                // Sanitize and assign a unique name
+                await handleFileData(file, fileType);
 
                 // Create a unique identifier for the file
                 const fileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -159,11 +172,11 @@ function setupDropzone(elementId, fileType) {
                         sampleFiles = sampleFiles.filter(f => !(f.type === 'amplicon' && f.name === file.name));
                     }
                     // Remove corresponding table row
-                    removeTableRow(file.name);
+                    removeTableRow(file.name, fileId);
                 });
 
                 // Handle file data
-                if (file.type === 'application/zip') {
+                if (file.name.endsWith('.zip')) {
                     // Handle ZIP files
                     try {
                         const zip = await JSZip.loadAsync(file);
@@ -180,10 +193,10 @@ function setupDropzone(elementId, fileType) {
                         const processingPromises = sigFiles.map(async (name) => {
                             const zipEntry = zip.files[name];
                             const sigContent = await zipEntry.async("string");
-                            console.log(`Extracted ${name}:`);
+                            const uniqueZipFileName = `${Date.now()}-${sanitizeFileName(zipEntry.name)}`; // Ensure uniqueness
 
-                            // Store extracted .sig files as samples
-                            sampleFiles.push({ name: zipEntry.name, content: sigContent, type: 'sample' });
+                            // Store extracted .sig files as samples with unique names
+                            sampleFiles.push({ name: uniqueZipFileName, content: sigContent, type: 'sample' });
 
                             // Generate a unique fileId for the extracted file
                             const extractedFileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -195,7 +208,7 @@ function setupDropzone(elementId, fileType) {
                             extractedFileRow.className = 'file-info row mb-2';
                             extractedFileRow.id = extractedFileId;
                             extractedFileRow.innerHTML = `
-                                <div class="col-6">${zipEntry.name} - ${(sigContent.length / 1024).toFixed(2)} KB</div>
+                                <div class="col-6">${uniqueZipFileName} - ${(sigContent.length / 1024).toFixed(2)} KB</div>
                                 <div class="col-4">
                                     <div class="progress">
                                         <div id="${extractedFileId}-progress" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
@@ -211,12 +224,12 @@ function setupDropzone(elementId, fileType) {
                             extractedFileRow.querySelector('.remove-file').addEventListener('click', () => {
                                 uploadedFilesContainerInner.removeChild(extractedFileRow);
                                 activeFileIds.delete(extractedFileId);
-                                sampleFiles = sampleFiles.filter(f => f.name !== zipEntry.name);
-                                removeTableRow(zipEntry.name);
+                                sampleFiles = sampleFiles.filter(f => f.name !== uniqueZipFileName);
+                                removeTableRow(uniqueZipFileName, extractedFileId);
                             });
 
                             // Push the processing promise to the array
-                            return processSignature(zipEntry.name, sigContent, extractedFileId);
+                            return processSignature(uniqueZipFileName, sigContent, extractedFileId);
                         });
 
                         // Await all processing promises
@@ -267,7 +280,7 @@ function setupDropzone(elementId, fileType) {
                 if (fileRow) {
                     const fileId = fileRow.id;
                     activeFileIds.delete(fileId);
-                    removeTableRow(file.name);
+                    removeTableRow(file.name, fileId);
                 }
 
                 if (file.type === 'application/zip') {
@@ -278,18 +291,29 @@ function setupDropzone(elementId, fileType) {
                     sampleFiles = sampleFiles.filter(sig => sig.name !== file.name);
                 }
                 // Remove corresponding table row
-                removeTableRow(file.name);
+                removeTableRow(file.name, null);
             });
         }
     });
 }
 
-// Function to remove a table row based on sample name
-function removeTableRow(sampleName) {
+// Function to remove a table row based on sample name and optionally fileId
+function removeTableRow(sampleName, fileId) {
     const rows = document.querySelectorAll('#resultsTableBody tr');
     rows.forEach(row => {
-        if (row.cells[0].textContent === sampleName) {
-            row.remove();
+        const cells = row.getElementsByTagName('td');
+        if (cells.length > 1) { // Ensure there are enough cells
+            const rowFileId = cells[0].textContent;
+            const rowSampleName = cells[1].textContent;
+            if (fileId) {
+                if (rowFileId === fileId) {
+                    row.remove();
+                }
+            } else {
+                if (rowSampleName === sampleName) {
+                    row.remove();
+                }
+            }
         }
     });
     // If no rows left, hide the table container
@@ -387,20 +411,20 @@ async function processSignature(fileName, sigContent, fileId) {
 }
 
 // Function to display results in the table
-function displayResultsInTable(result, fileId) {
+function displayResultsInTable(result, fileId, fileName) {
     const resultsTableBody = document.getElementById('resultsTableBody');
     const resultsTableHead = document.getElementById('resultsTableHead');
 
-    // Get the keys from the result object to dynamically generate the table headers
+    // Define headers including 'File ID' and 'Sample Name'
     const keys = Object.keys(result);
+    const headers = [...keys];
 
     // If headers are not yet created, create them
     if (resultsTableHead.innerHTML.trim() === '') {
-        // Create table headers dynamically based on the result keys
         const headerRow = document.createElement('tr');
-        keys.forEach(key => {
+        headers.forEach(header => {
             const headerCell = document.createElement('th');
-            headerCell.textContent = key;
+            headerCell.textContent = header;
             headerRow.appendChild(headerCell);
         });
         resultsTableHead.appendChild(headerRow);
@@ -408,6 +432,18 @@ function displayResultsInTable(result, fileId) {
 
     // Create a new row for the result
     const row = document.createElement('tr');
+
+    // Add File ID
+    const fileIdCell = document.createElement('td');
+    fileIdCell.textContent = fileId;
+    // row.appendChild(fileIdCell);
+
+    // Add Sample Name
+    const sampleNameCell = document.createElement('td');
+    sampleNameCell.textContent = fileName;
+    // row.appendChild(sampleNameCell);
+
+    // Add other result cells
     keys.forEach(key => {
         const cell = document.createElement('td');
         cell.textContent = result[key] || 'N/A';  // Use 'N/A' if value is missing

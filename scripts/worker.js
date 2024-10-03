@@ -145,7 +145,7 @@ result_json
 
             // Update progress to 100%
             self.postMessage({ type: 'progress', fileId: fileId, percentage: 100, statusText: 'Completed' });
-            self.postMessage({ type: 'result', fileId: fileId, result: serializableResult });
+            self.postMessage({ type: 'result', fileId: fileId, result: serializableResult, fileName: fileName });
 
             console.log(`Processing completed for fileId: ${fileId}`);
         } catch (error) {
@@ -154,4 +154,3 @@ result_json
         }
     }
 };
-
