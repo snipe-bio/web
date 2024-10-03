@@ -2,9 +2,53 @@
 Dropzone.autoDiscover = false;
 
 // Global Variables
-let pyodide;
+let worker;
 let sampleFiles = [];
 let specificChrsContent = {};
+let activeFileIds = new Set(); // Track active file IDs
+
+// Initialize Web Worker
+function initializeWorker() {
+    worker = new Worker('scripts/worker.js');
+
+    worker.onmessage = function (event) {
+        const { type, fileId, percentage, statusText, result, error, message } = event.data;
+    
+        if (type === 'pyodide-ready') {
+            console.log('Pyodide is ready in the worker.');
+        }
+    
+        if (type === 'error') {
+            console.error(message);
+            alert(message);
+        }
+    
+        if (type === 'progress') {
+            if (!activeFileIds.has(fileId)) {
+                // The file has been removed; ignore updates
+                console.warn(`Received progress for inactive fileId: ${fileId}`);
+                return;
+            }
+            updateProgressBar(fileId, percentage, statusText,
+                percentage === 100 && statusText === 'Completed' ? 'bg-success' :
+                    (statusText.startsWith('Failed') ? 'bg-danger' : 'bg-info'));
+            if (percentage === 100 && statusText.startsWith('Failed')) {
+                alert(`Processing failed for ${fileId}: ${error}`);
+            }
+        }
+        if (type === 'result') {
+            if (!activeFileIds.has(fileId)) {
+                console.warn(`Received result for inactive fileId: ${fileId}`);
+                displayResultsInTable(result, fileId);
+                return;
+            }
+        }
+    };
+
+    // No need to send an 'init' message unless the worker expects it
+}
+
+initializeWorker();
 
 // Define the directory structure
 const speciesData = {
@@ -46,42 +90,9 @@ function showLoadingAnimation(show) {
     loader.style.display = show ? 'flex' : 'none';
 }
 
-// Function to load Pyodide and required Python packages
-async function loadPyodideAndPackages() {
-    showLoadingAnimation(true);
-    try {
-        console.log('Loading Pyodide...');
-        pyodide = await loadPyodide({
-            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/",
-            fullStdLib: true
-        });
-        console.log('Pyodide loaded successfully.');
 
-        console.log('Loading Python packages...');
-        await pyodide.loadPackage(['micropip', 'numpy', 'pandas', 'scipy', 'scikit-learn']);
-        console.log('Python packages loaded successfully.');
-
-        console.log('Loading local Python files...');
-        const response = await fetch('snipe.py');
-        const code = await response.text();
-        pyodide.runPython(code);
-        console.log('Local Python files loaded successfully.');
-
-        await pyodide.runPythonAsync(`
-            print(dir(SigType))
-        `);
-        console.log('Python code executed successfully.');
-
-        return pyodide;
-    } catch (error) {
-        console.error('Failed to load Pyodide or packages:', error);
-    } finally {
-        showLoadingAnimation(false);
-    }
-}
 
 // Initialize Pyodide
-let pyodideReady = loadPyodideAndPackages();
 
 // Function to handle file data based on type
 async function handleFileData(file, fileType) {
@@ -109,8 +120,8 @@ function setupDropzone(elementId, fileType) {
         clickable: true,
         previewsContainer: false, // Disable preview
         acceptedFiles: '.sig,.zip', // Accept .sig and .zip files
-        init: function() {
-            this.on('addedfile', async function(file) {
+        init: function () {
+            this.on('addedfile', async function (file) {
                 if (fileType === 'genome' && this.files.length > 1) {
                     this.removeFile(this.files[0]); // Keep only the most recent file if only one is allowed
                 }
@@ -154,26 +165,62 @@ function setupDropzone(elementId, fileType) {
                 });
 
                 // Handle file data
+                // Inside the 'application/zip' handling block in Dropzone's 'addedfile' event
                 if (file.type === 'application/zip') {
                     // Handle ZIP files
-                    const zip = new JSZip();
                     try {
-                        const content = await zip.loadAsync(file);
-                        const processingPromises = []; // Array to hold processing promises
+                        const zip = await JSZip.loadAsync(file);
+                        const sigFiles = Object.keys(zip.files).filter(name => !zip.files[name].dir && name.endsWith('.sig'));
 
-                        content.forEach(async (relativePath, zipEntry) => {
-                            if (!zipEntry.dir && zipEntry.name.endsWith('.sig')) {
-                                const sigContent = await zipEntry.async("string");
-                                console.log(`Extracted ${zipEntry.name}:`);
-                                // Store extracted .sig files as samples
-                                sampleFiles.push({ name: zipEntry.name, content: sigContent, type: 'sample' });
-                                // Push the processing promise to the array
-                                processingPromises.push(processSignature(zipEntry.name, sigContent, fileId));
-                            }
-                        });
+                        if (sigFiles.length === 0) {
+                            throw new Error('No .sig files found in the ZIP archive.');
+                        }
 
                         // Show loading modal
                         showLoadingAnimation(true);
+
+                        // Process each .sig file
+                        const processingPromises = sigFiles.map(async (name) => {
+                            const zipEntry = zip.files[name];
+                            const sigContent = await zipEntry.async("string");
+                            console.log(`Extracted ${name}:`);
+
+                            // Store extracted .sig files as samples
+                            sampleFiles.push({ name: zipEntry.name, content: sigContent, type: 'sample' });
+
+                            // Generate a unique fileId for the extracted file
+                            const extractedFileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                            activeFileIds.add(extractedFileId);
+
+                            // Create file entry with progress bar for extracted file
+                            const uploadedFilesContainer = document.getElementById('uploaded-files');
+                            const extractedFileRow = document.createElement('div');
+                            extractedFileRow.className = 'file-info row mb-2';
+                            extractedFileRow.id = extractedFileId;
+                            extractedFileRow.innerHTML = `
+                <div class="col-6">${zipEntry.name} - ${(sigContent.length / 1024).toFixed(2)} KB</div>
+                <div class="col-4">
+                    <div class="progress">
+                        <div id="${extractedFileId}-progress" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                    </div>
+                </div>
+                <div class="col-2 text-right">
+                    <button class="btn btn-danger btn-sm remove-file">Remove</button>
+                </div>
+            `;
+                            uploadedFilesContainer.appendChild(extractedFileRow);
+
+                            // Handle remove button for extracted file
+                            extractedFileRow.querySelector('.remove-file').addEventListener('click', () => {
+                                uploadedFilesContainer.removeChild(extractedFileRow);
+                                activeFileIds.delete(extractedFileId);
+                                sampleFiles = sampleFiles.filter(f => f.name !== zipEntry.name);
+                                removeTableRow(zipEntry.name);
+                            });
+
+                            // Push the processing promise to the array
+                            return processSignature(zipEntry.name, sigContent, extractedFileId);
+                        });
 
                         // Await all processing promises
                         await Promise.all(processingPromises);
@@ -183,10 +230,11 @@ function setupDropzone(elementId, fileType) {
                     } catch (error) {
                         console.error('Error extracting ZIP file:', error);
                         showLoadingAnimation(false); // Ensure loader is hidden on error
-                        // Update progress bar to indicate failure
+                        // Update progress bar to indicate failure for the main ZIP file
                         updateProgressBar(fileId, 100, 'Failed', 'bg-danger');
                     }
-                } else if (file.name.endsWith('.sig')) {
+                }
+                else if (file.name.endsWith('.sig')) {
                     // Handle individual .sig files
                     const content = await file.text();
                     console.log(`Uploaded ${file.name}:`);
@@ -244,7 +292,6 @@ function removeTableRow(sampleName) {
 
 // Function to process a single signature file
 async function processSignature(fileName, sigContent, fileId) {
-    const pyodide = await pyodideReady;
     try {
         // Update progress to 10%
         updateProgressBar(fileId, 10, 'Starting...', 'bg-info');
@@ -262,11 +309,7 @@ async function processSignature(fileName, sigContent, fileId) {
             return;
         }
 
-        // console log sigContent
         console.log(`Processing ${fileName}:`);
-
-        // Update progress to 20%
-        updateProgressBar(fileId, 20, 'Fetching specific chromosomes...', 'bg-info');
 
         // Get loaded genome and y_chr content
         const genomeContent = window.loadedGenomeSig;
@@ -292,14 +335,14 @@ async function processSignature(fileName, sigContent, fileId) {
                     const chrSigContent = await response.text();
                     specificChrsContent[chr] = chrSigContent;
                     console.log(`Loaded specific chromosome (${chr}):`);
-                    // console.log(chrSigContent.substring(0, 50)); // Log first 50 characters
                 } else {
-                    console.warn(`Specific chromosome file not found: ${chrPath}`);
+                    console.error(`Failed to load chromosome file: ${chrPath}. Status: ${response.status} - ${response.statusText}`);
                 }
             } catch (error) {
-                console.error(`Error fetching specific chromosome (${chr}):`, error);
+                console.error(`Error fetching specific chromosome (${chr}) from ${chrPath}:`, error);
             }
         });
+
 
         // Await all chromosome fetches
         await Promise.all(chrPromises);
@@ -311,102 +354,30 @@ async function processSignature(fileName, sigContent, fileId) {
         let ampliconContent = null;
         if (window.loadedAmpliconSig) {
             ampliconContent = window.loadedAmpliconSig;
-            console.log(`Loaded Amplicon (${window.loadedAmpliconSig.name}):`);
-            console.log(ampliconContent.substring(0, 50)); // Log first 50 characters
+            console.log(`Loaded Amplicon:`);
         }
 
-        // Set Python variables
-        pyodide.globals.set('genome_sig_str', JSON.stringify(genomeContent));
-        pyodide.globals.set('ychr_sig_str', JSON.stringify(ychrContent));
-        pyodide.globals.set('specific_chrs_sigs', JSON.stringify(specificChrsContent));
-        pyodide.globals.set('amplicon_sig_str', JSON.stringify(ampliconContent) || '{}');
-        pyodide.globals.set('sample_sig_str', JSON.stringify(sigContent));
+        // Prepare data to send to the worker
+        const data = {
+            fileId, // Pass the unique fileId
+            fileName,
+            sigContent,
+            genomeContent,
+            ychrContent,
+            specificChrsContent,
+            ampliconContent
+        };
 
-        // set signature file name
-        pyodide.globals.set('fileName', fileName);
+        // Send data to the worker for processing
+        try {
+            // Make sure data is serializable
+            const testPayload = JSON.parse(JSON.stringify(data));
+            worker.postMessage({ type: 'process-signature', data });
+        } catch (error) {
+            console.error('Error serializing data before sending to worker:', error);
+            updateProgressBar(fileId, 100, 'Failed: Data serialization error', 'bg-danger');
+        }
 
-        // Update progress to 60%
-        updateProgressBar(fileId, 60, 'Running Python processing...', 'bg-info');
-
-        // Run Python processing
-        const pythonCode = `
-import json
-
-def parse_json_string(json_str):
-    try:
-        # If the string starts and ends with quotes, it's a doubly wrapped JSON string
-        if json_str.startswith('"') and json_str.endswith('"'):
-            json_str = json.loads(json_str)  # First load to remove the extra wrapping quotes
-        return json.loads(json_str)  # Final load to get the actual JSON object
-    except json.JSONDecodeError as e:
-        print(f"Error decoding JSON: {e}")
-        return None
-
-result = process_sample(
-        snipe_sample=json.dumps((parse_json_string(sample_sig_str))),
-        snipe_genome=json.dumps(parse_json_string(genome_sig_str)),
-        snipe_amplicon=json.dumps(parse_json_string(amplicon_sig_str)),
-        dict_chrs_snipe_sigs=json.dumps(parse_json_string(specific_chrs_sigs)),
-        biosample_id=fileName,
-        bioproject_id=fileName,
-        sample_id=fileName,
-        assay_type="WGS",
-    )
-
-result_json = {
-"SRA Experiment accession": result["SRA Experiment accession"],
-"BioSample accession": result["BioSample accession"],
-"BioProject accession": result["BioProject accession"],
-"SRA Assay type": result["SRA Assay type"],
-"Number of bases": result["Number of bases"],
-"Library Layout": result["Library Layout"],
-"Total unique k-mers": result["Total unique k-mers"],
-"Genomic unique k-mers": result["Genomic unique k-mers"],
-"Exome unique k-mers": result["Exome unique k-mers"],
-"Genome coverage index": result["Genome coverage index"],
-"Exome coverage index": result["Exome coverage index"],
-"k-mer total abundance": result["k-mer total abundance"],
-"k-mer mean abundance": result["k-mer mean abundance"],
-"Genomic k-mers total abundance": result["Genomic k-mers total abundance"],
-"Genomic k-mers mean abundance": result["Genomic k-mers mean abundance"],
-"Genomic k-mers median abundance": result["Genomic k-mers median abundance"],
-"Exome k-mers total abundance": result["Exome k-mers total abundance"],
-"Exome k-mers mean abundance": result["Exome k-mers mean abundance"],
-"Exome k-mers median abundance": result["Exome k-mers median abundance"],
-"Mapping index": result["Mapping index"],
-"Predicted contamination index": result["Predicted contamination index"],
-"Empirical contamination index": result["Empirical contamination index"],
-"Sequencing errors index": result["Sequencing errors index"],
-"Autosomal k-mer mean abundance CV": result["Autosomal k-mer mean abundance CV"],
-"Exome enrichment score": result["Exome enrichment score"],
-"Predicted Assay type": result["Predicted Assay type"],
-"chrX Ploidy score": result["chrX Ploidy score"],
-"chrY Coverage score": result["chrY Coverage score"],
-"Median-trimmed relative coverage": result["Median-trimmed relative coverage"],
-"Relative mean abundance": result["Relative mean abundance"],
-"Relative coverage": result["Relative coverage"],
-"Coverage of 1fold more sequencing": result["Coverage of 1fold more sequencing"],
-"Coverage of 2fold more sequencing": result["Coverage of 2fold more sequencing"],
-"Coverage of 5fold more sequencing": result["Coverage of 5fold more sequencing"],
-"Coverage of 9fold more sequencing": result["Coverage of 9fold more sequencing"],
-"Relative total abundance": result["Relative total abundance"]
-}
-
-result_json
-        `;
-
-        const result = await pyodide.runPythonAsync(pythonCode);
-        const resultObj = result.toJs()
-        // console.log('Sample result:', resultObj); // Debugging line
-
-        // Update progress to 80%
-        updateProgressBar(fileId, 80, 'Displaying results...', 'bg-info');
-
-        // Display the result in the table
-        displayResultsInTable(resultObj);
-
-        // Update progress to 100%
-        updateProgressBar(fileId, 100, 'Completed', 'bg-success');
     } catch (error) {
         console.error(`Error processing ${fileName}:`, error);
         // Update progress bar to indicate failure
@@ -415,7 +386,7 @@ result_json
 }
 
 // Function to display results in the table
-function displayResultsInTable(result) {
+function displayResultsInTable(result, fileId) {
     const resultsTableBody = document.getElementById('resultsTableBody');
     const resultsTableHead = document.getElementById('resultsTableHead');
 
@@ -445,7 +416,11 @@ function displayResultsInTable(result) {
 
     // Show the results table container
     document.getElementById('resultsTableContainer').style.display = 'block';
+
+    // Remove the fileId from active files as processing is complete
+    activeFileIds.delete(fileId);
 }
+
 
 // Function to export the table as a TSV file
 function exportTableToTSV() {
@@ -476,7 +451,7 @@ function exportTableToTSV() {
 }
 
 // Add export button functionality
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const exportButton = document.getElementById('exportButton');
     exportButton.addEventListener('click', exportTableToTSV);
 });
