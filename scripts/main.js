@@ -450,6 +450,24 @@ function displayResultsInTable(result, fileId, fileName) {
     activeFileIds.delete(fileId);
 }
 
+// Function to update all "BioProject accession" columns in real-time
+document.getElementById('bioprojectInput').addEventListener('input', function () {
+    const newBioProjectAccession = document.getElementById('bioprojectInput').value;
+
+    // Get all cells under the "BioProject accession" column
+    const bioProjectColumnIndex = [...document.querySelectorAll('#resultsTableHead th')].findIndex(th => th.textContent === 'BioProject accession');
+
+    // Update each BioProject cell in the rows
+    if (bioProjectColumnIndex !== -1) {  // Make sure the column exists
+        document.querySelectorAll(`#resultsTableBody tr`).forEach(row => {
+            const bioProjectCell = row.children[bioProjectColumnIndex];
+            if (bioProjectCell) {
+                bioProjectCell.textContent = newBioProjectAccession;
+            }
+        });
+    }
+});
+
 // Function to export the table as a TSV file
 function exportTableToTSV() {
     const resultsTable = document.querySelector('table.table-striped');
