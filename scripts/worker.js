@@ -34,8 +34,26 @@ async function initializePyodide() {
 
 initializePyodide();
 
+// Implement a simple queue to handle one message at a time
+let messageQueue = [];
+let isProcessing = false;
+
 self.onmessage = async (event) => {
     const { type, data } = event.data;
+
+    if (type === 'process-signature') {
+        messageQueue.push({ type, data });
+        processQueue();
+    }
+};
+
+async function processQueue() {
+    if (isProcessing || messageQueue.length === 0) {
+        return;
+    }
+
+    isProcessing = true;
+    const { type, data } = messageQueue.shift();
 
     if (type === 'process-signature') {
         const { fileId, fileName, sigContent, genomeContent, ychrContent, specificChrsContent, ampliconContent } = data;
@@ -145,7 +163,7 @@ result_json
 
             // Update progress to 100%
             self.postMessage({ type: 'progress', fileId: fileId, percentage: 100, statusText: 'Completed' });
-            self.postMessage({ type: 'result', fileId: fileId, result: serializableResult, fileName: fileName });
+            self.postMessage({ type: 'result', fileId: fileId, fileName: fileName, result: serializableResult });
 
             console.log(`Processing completed for fileId: ${fileId}`);
         } catch (error) {
@@ -153,4 +171,7 @@ result_json
             self.postMessage({ type: 'progress', fileId: fileId, percentage: 100, statusText: 'Failed', error: error.message });
         }
     }
-};
+
+    isProcessing = false;
+    processQueue(); // Process next message in the queue
+}

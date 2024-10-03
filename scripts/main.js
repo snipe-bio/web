@@ -37,6 +37,7 @@ function initializeWorker() {
                 alert(`Processing failed for ${fileId}: ${error}`);
             }
         }
+
         if (type === 'result') {
             if (activeFileIds.has(fileId)) {
                 displayResultsInTable(result, fileId, fileName);
@@ -415,9 +416,9 @@ function displayResultsInTable(result, fileId, fileName) {
     const resultsTableBody = document.getElementById('resultsTableBody');
     const resultsTableHead = document.getElementById('resultsTableHead');
 
-    // Define headers including 'File ID' and 'Sample Name'
+    // Define headers based on the result keys
     const keys = Object.keys(result);
-    const headers = [...keys];
+    const headers = keys;
 
     // If headers are not yet created, create them
     if (resultsTableHead.innerHTML.trim() === '') {
@@ -432,18 +433,9 @@ function displayResultsInTable(result, fileId, fileName) {
 
     // Create a new row for the result
     const row = document.createElement('tr');
+    row.id = `result-${fileId}`; // Assign a unique ID to the row based on fileId
 
-    // Add File ID
-    const fileIdCell = document.createElement('td');
-    fileIdCell.textContent = fileId;
-    // row.appendChild(fileIdCell);
-
-    // Add Sample Name
-    const sampleNameCell = document.createElement('td');
-    sampleNameCell.textContent = fileName;
-    // row.appendChild(sampleNameCell);
-
-    // Add other result cells
+    // Add result cells
     keys.forEach(key => {
         const cell = document.createElement('td');
         cell.textContent = result[key] || 'N/A';  // Use 'N/A' if value is missing
