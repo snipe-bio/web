@@ -43,8 +43,8 @@ self.onmessage = async (event) => {
         try {
             console.log(`Processing signature for fileId: ${fileId}, fileName: ${fileName}`);
 
-            // Update progress to 50%
-            self.postMessage({ type: 'progress', fileId: fileId, percentage: 50, statusText: 'Setting up Python environment...' });
+            // Update progress to 10%
+            self.postMessage({ type: 'progress', fileId: fileId, percentage: 10, statusText: 'Starting...' });
 
             // Set Python variables
             self.pyodide.globals.set('genome_sig_str', JSON.stringify(genomeContent));
@@ -53,15 +53,19 @@ self.onmessage = async (event) => {
             self.pyodide.globals.set('amplicon_sig_str', JSON.stringify(ampliconContent) || '{}');
             self.pyodide.globals.set('sample_sig_str', JSON.stringify(sigContent));
             self.pyodide.globals.set('fileName', fileName);
+            self.pyodide.globals.set('fileId', fileId);
             console.log('Python variables set.');
 
             // Update progress to 60%
-            self.postMessage({ type: 'progress', fileId: fileId, percentage: 60, statusText: 'Running Python processing...' });
+            self.postMessage({ type: 'progress', fileId: fileId, percentage: 60, statusText: 'Snipe in progress...' });
             console.log('Running Python code...');
 
             // Run Python processing
             const pythonCode = `
 import json
+
+
+file_name = fileName.split('.')[0]
 
 def parse_json_string(json_str):
     try:
@@ -74,58 +78,59 @@ def parse_json_string(json_str):
         return None
 
 result = process_sample(
-    snipe_sample=json.dumps((parse_json_string(sample_sig_str))),
-    snipe_genome=json.dumps(parse_json_string(genome_sig_str)),
-    snipe_amplicon=json.dumps(parse_json_string(amplicon_sig_str)),
-    dict_chrs_snipe_sigs=json.dumps(parse_json_string(specific_chrs_snipe_sigs)),
-    biosample_id=fileName,
-    bioproject_id=fileName,
-    sample_id=fileName,
-    assay_type="WGS",
-)
+        snipe_sample=json.dumps((parse_json_string(sample_sig_str))),
+        snipe_genome=json.dumps(parse_json_string(genome_sig_str)),
+        snipe_amplicon=json.dumps(parse_json_string(amplicon_sig_str)),
+        dict_chrs_snipe_sigs=json.dumps(parse_json_string(specific_chrs_snipe_sigs)),
+        biosample_id=file_name,
+        bioproject_id=file_name,
+        sample_id=file_name,
+        assay_type="WGS",
+    )
 
 result_json = {
-    "SRA Experiment accession": result.get("SRA Experiment accession", "N/A"),
-    "BioSample accession": result.get("BioSample accession", "N/A"),
-    "BioProject accession": result.get("BioProject accession", "N/A"),
-    "SRA Assay type": result.get("SRA Assay type", "N/A"),
-    "Number of bases": result.get("Number of bases", "N/A"),
-    "Library Layout": result.get("Library Layout", "N/A"),
-    "Total unique k-mers": result.get("Total unique k-mers", "N/A"),
-    "Genomic unique k-mers": result.get("Genomic unique k-mers", "N/A"),
-    "Exome unique k-mers": result.get("Exome unique k-mers", "N/A"),
-    "Genome coverage index": result.get("Genome coverage index", "N/A"),
-    "Exome coverage index": result.get("Exome coverage index", "N/A"),
-    "k-mer total abundance": result.get("k-mer total abundance", "N/A"),
-    "k-mer mean abundance": result.get("k-mer mean abundance", "N/A"),
-    "Genomic k-mers total abundance": result.get("Genomic k-mers total abundance", "N/A"),
-    "Genomic k-mers mean abundance": result.get("Genomic k-mers mean abundance", "N/A"),
-    "Genomic k-mers median abundance": result.get("Genomic k-mers median abundance", "N/A"),
-    "Exome k-mers total abundance": result.get("Exome k-mers total abundance", "N/A"),
-    "Exome k-mers mean abundance": result.get("Exome k-mers mean abundance", "N/A"),
-    "Exome k-mers median abundance": result.get("Exome k-mers median abundance", "N/A"),
-    "Mapping index": result.get("Mapping index", "N/A"),
-    "Predicted contamination index": result.get("Predicted contamination index", "N/A"),
-    "Empirical contamination index": result.get("Empirical contamination index", "N/A"),
-    "Sequencing errors index": result.get("Sequencing errors index", "N/A"),
-    "Autosomal k-mer mean abundance CV": result.get("Autosomal k-mer mean abundance CV", "N/A"),
-    "Exome enrichment score": result.get("Exome enrichment score", "N/A"),
-    "Predicted Assay type": result.get("Predicted Assay type", "N/A"),
-    "chrX Ploidy score": result.get("chrX Ploidy score", "N/A"),
-    "chrY Coverage score": result.get("chrY Coverage score", "N/A"),
-    "Median-trimmed relative coverage": result.get("Median-trimmed relative coverage", "N/A"),
-    "Relative mean abundance": result.get("Relative mean abundance", "N/A"),
-    "Relative coverage": result.get("Relative coverage", "N/A"),
-    "Coverage of 1fold more sequencing": result.get("Coverage of 1fold more sequencing", "N/A"),
-    "Coverage of 2fold more sequencing": result.get("Coverage of 2fold more sequencing", "N/A"),
-    "Coverage of 5fold more sequencing": result.get("Coverage of 5fold more sequencing", "N/A"),
-    "Coverage of 9fold more sequencing": result.get("Coverage of 9fold more sequencing", "N/A"),
-    "Relative total abundance": result.get("Relative total abundance", "N/A")
+"SRA Experiment accession": result["SRA Experiment accession"],
+"BioSample accession": result["BioSample accession"],
+"BioProject accession": result["BioProject accession"],
+"SRA Assay type": result["SRA Assay type"],
+"Number of bases": result["Number of bases"],
+"Library Layout": result["Library Layout"],
+"Total unique k-mers": result["Total unique k-mers"],
+"Genomic unique k-mers": result["Genomic unique k-mers"],
+"Exome unique k-mers": result["Exome unique k-mers"],
+"Genome coverage index": result["Genome coverage index"],
+"Exome coverage index": result["Exome coverage index"],
+"k-mer total abundance": result["k-mer total abundance"],
+"k-mer mean abundance": result["k-mer mean abundance"],
+"Genomic k-mers total abundance": result["Genomic k-mers total abundance"],
+"Genomic k-mers mean abundance": result["Genomic k-mers mean abundance"],
+"Genomic k-mers median abundance": result["Genomic k-mers median abundance"],
+"Exome k-mers total abundance": result["Exome k-mers total abundance"],
+"Exome k-mers mean abundance": result["Exome k-mers mean abundance"],
+"Exome k-mers median abundance": result["Exome k-mers median abundance"],
+"Mapping index": result["Mapping index"],
+"Predicted contamination index": result["Predicted contamination index"],
+"Empirical contamination index": result["Empirical contamination index"],
+"Sequencing errors index": result["Sequencing errors index"],
+"Autosomal k-mer mean abundance CV": result["Autosomal k-mer mean abundance CV"],
+"Exome enrichment score": result["Exome enrichment score"],
+"Predicted Assay type": result["Predicted Assay type"],
+"chrX Ploidy score": result["chrX Ploidy score"],
+"chrY Coverage score": result["chrY Coverage score"],
+"Median-trimmed relative coverage": result["Median-trimmed relative coverage"],
+"Relative mean abundance": result["Relative mean abundance"],
+"Relative coverage": result["Relative coverage"],
+"Coverage of 1fold more sequencing": result["Coverage of 1fold more sequencing"],
+"Coverage of 2fold more sequencing": result["Coverage of 2fold more sequencing"],
+"Coverage of 5fold more sequencing": result["Coverage of 5fold more sequencing"],
+"Coverage of 9fold more sequencing": result["Coverage of 9fold more sequencing"],
+"Relative total abundance": result["Relative total abundance"]
 }
 
 result_json
 `;
 
+            // Update progress to 80%
             const result = await self.pyodide.runPythonAsync(pythonCode);
             console.log('Python code executed successfully.');
 
@@ -134,6 +139,9 @@ result_json
 
             // Ensure resultObj is serializable
             const serializableResult = JSON.parse(JSON.stringify(resultObj));
+
+            // Update progress to 90%
+            self.postMessage({ type: 'progress', fileId: fileId, percentage: 90, statusText: 'Processing results...' });
 
             // Update progress to 100%
             self.postMessage({ type: 'progress', fileId: fileId, percentage: 100, statusText: 'Completed' });
@@ -146,5 +154,4 @@ result_json
         }
     }
 };
-
 

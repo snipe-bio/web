@@ -1587,31 +1587,30 @@ def process_sample(
     
     result_dict["Exome enrichment score"] = amplicon_score
     
-    # ROI
     
     fold_to_roi_coverage = {}
     if predicted_assay_type == 'WGS':    
         sample_sig.calculate_genomic_roi(5)
-        for fold in [1, 2, 5, 9]:
+        for fold in [9]:
             n_predict = (fold+1) * 5
             extra_increase, final_coverage_index = sample_sig.predict_genomic_roi(n_predict, show_plot=False)
             fold_to_roi_coverage[fold] = final_coverage_index
             
     elif predicted_assay_type == 'WXS':
         sample_sig.calculate_exome_roi("amplicon", 5)
-        for fold in [1, 2, 5, 9]:
+        for fold in [9]:
             n_predict = (fold+1) * 5
             extra_increase, final_coverage_index = sample_sig.predict_amplicon_roi(amplicon_name="exome", n_predict=n_predict, show_plot=False)
             fold_to_roi_coverage[fold] = final_coverage_index
     
     else:
-        for fold in [1, 2, 5, 9]:
+        for fold in [9]:
             fold_to_roi_coverage[fold] = np.nan
     
     
-    result_dict["Coverage of 1fold more sequencing"] = fold_to_roi_coverage[1]
-    result_dict["Coverage of 2fold more sequencing"] = fold_to_roi_coverage[2]
-    result_dict["Coverage of 5fold more sequencing"] = fold_to_roi_coverage[5]
+    # result_dict["Coverage of 1fold more sequencing"] = fold_to_roi_coverage[1]
+    # result_dict["Coverage of 2fold more sequencing"] = fold_to_roi_coverage[2]
+    # result_dict["Coverage of 5fold more sequencing"] = fold_to_roi_coverage[5]
     result_dict["Coverage of 9fold more sequencing"] = fold_to_roi_coverage[9]
     
 

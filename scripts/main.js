@@ -6,6 +6,7 @@ let worker;
 let sampleFiles = [];
 let specificChrsContent = {};
 let activeFileIds = new Set(); // Track active file IDs
+let mainDataLoaded = false; // Flag to check if main data is loaded
 
 // Initialize Web Worker
 function initializeWorker() {
@@ -13,16 +14,16 @@ function initializeWorker() {
 
     worker.onmessage = function (event) {
         const { type, fileId, percentage, statusText, result, error, message } = event.data;
-    
+
         if (type === 'pyodide-ready') {
             console.log('Pyodide is ready in the worker.');
         }
-    
+
         if (type === 'error') {
             console.error(message);
             alert(message);
         }
-    
+
         if (type === 'progress') {
             if (!activeFileIds.has(fileId)) {
                 // The file has been removed; ignore updates
@@ -37,10 +38,10 @@ function initializeWorker() {
             }
         }
         if (type === 'result') {
-            if (!activeFileIds.has(fileId)) {
-                console.warn(`Received result for inactive fileId: ${fileId}`);
+            if (activeFileIds.has(fileId)) {
                 displayResultsInTable(result, fileId);
-                return;
+            } else {
+                console.warn(`Received result for inactive fileId: ${fileId}`);
             }
         }
     };
@@ -90,10 +91,6 @@ function showLoadingAnimation(show) {
     loader.style.display = show ? 'flex' : 'none';
 }
 
-
-
-// Initialize Pyodide
-
 // Function to handle file data based on type
 async function handleFileData(file, fileType) {
     const fileContent = await file.text();
@@ -112,7 +109,6 @@ async function handleFileData(file, fileType) {
 }
 
 // Function to setup Dropzone for different file types
-// Function to setup Dropzone for different file types
 function setupDropzone(elementId, fileType) {
     return new Dropzone(elementId, {
         url: '#', // Dummy action as no server interaction is required
@@ -128,6 +124,7 @@ function setupDropzone(elementId, fileType) {
 
                 // Create a unique identifier for the file
                 const fileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                activeFileIds.add(fileId);
 
                 // Create file entry with progress bar
                 const uploadedFilesContainer = document.getElementById('uploaded-files');
@@ -153,6 +150,7 @@ function setupDropzone(elementId, fileType) {
                 fileRow.querySelector('.remove-file').addEventListener('click', () => {
                     this.removeFile(file);
                     uploadedFilesContainer.removeChild(fileRow);
+                    activeFileIds.delete(fileId);
                     if (fileType === 'sample') {
                         sampleFiles = sampleFiles.filter(f => f.name !== file.name);
                     } else if (fileType === 'genome') {
@@ -165,7 +163,6 @@ function setupDropzone(elementId, fileType) {
                 });
 
                 // Handle file data
-                // Inside the 'application/zip' handling block in Dropzone's 'addedfile' event
                 if (file.type === 'application/zip') {
                     // Handle ZIP files
                     try {
@@ -193,26 +190,26 @@ function setupDropzone(elementId, fileType) {
                             activeFileIds.add(extractedFileId);
 
                             // Create file entry with progress bar for extracted file
-                            const uploadedFilesContainer = document.getElementById('uploaded-files');
+                            const uploadedFilesContainerInner = document.getElementById('uploaded-files');
                             const extractedFileRow = document.createElement('div');
                             extractedFileRow.className = 'file-info row mb-2';
                             extractedFileRow.id = extractedFileId;
                             extractedFileRow.innerHTML = `
-                <div class="col-6">${zipEntry.name} - ${(sigContent.length / 1024).toFixed(2)} KB</div>
-                <div class="col-4">
-                    <div class="progress">
-                        <div id="${extractedFileId}-progress" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
-                    </div>
-                </div>
-                <div class="col-2 text-right">
-                    <button class="btn btn-danger btn-sm remove-file">Remove</button>
-                </div>
-            `;
-                            uploadedFilesContainer.appendChild(extractedFileRow);
+                                <div class="col-6">${zipEntry.name} - ${(sigContent.length / 1024).toFixed(2)} KB</div>
+                                <div class="col-4">
+                                    <div class="progress">
+                                        <div id="${extractedFileId}-progress" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                                    </div>
+                                </div>
+                                <div class="col-2 text-right">
+                                    <button class="btn btn-danger btn-sm remove-file">Remove</button>
+                                </div>
+                            `;
+                            uploadedFilesContainerInner.appendChild(extractedFileRow);
 
                             // Handle remove button for extracted file
                             extractedFileRow.querySelector('.remove-file').addEventListener('click', () => {
-                                uploadedFilesContainer.removeChild(extractedFileRow);
+                                uploadedFilesContainerInner.removeChild(extractedFileRow);
                                 activeFileIds.delete(extractedFileId);
                                 sampleFiles = sampleFiles.filter(f => f.name !== zipEntry.name);
                                 removeTableRow(zipEntry.name);
@@ -232,36 +229,47 @@ function setupDropzone(elementId, fileType) {
                         showLoadingAnimation(false); // Ensure loader is hidden on error
                         // Update progress bar to indicate failure for the main ZIP file
                         updateProgressBar(fileId, 100, 'Failed', 'bg-danger');
+                        activeFileIds.delete(fileId);
                     }
                 }
                 else if (file.name.endsWith('.sig')) {
                     // Handle individual .sig files
-                    const content = await file.text();
-                    console.log(`Uploaded ${file.name}:`);
-                    console.log(content);
-                    // Store sample files
-                    sampleFiles.push({ name: file.name, content: content, type: 'sample' });
-                    // Push the processing promise to the array
-                    const processingPromise = processSignature(file.name, content, fileId);
-
-                    // Show loading modal
-                    showLoadingAnimation(true);
-
-                    // Await the processing
                     try {
+                        const content = await file.text();
+                        console.log(`Uploaded ${file.name}:`);
+                        // console.log(content);
+                        // Store sample files
+                        sampleFiles.push({ name: file.name, content: content, type: 'sample' });
+                        // Push the processing promise to the array
+                        const processingPromise = processSignature(file.name, content, fileId);
+
+                        // Show loading modal
+                        showLoadingAnimation(true);
+
+                        // Await the processing
                         await processingPromise;
+
+                        // Hide loading modal after processing
+                        showLoadingAnimation(false);
                     } catch (error) {
                         console.error(`Error processing ${file.name}:`, error);
                         // Update progress bar to indicate failure
                         updateProgressBar(fileId, 100, 'Failed', 'bg-danger');
+                        activeFileIds.delete(fileId);
+                        showLoadingAnimation(false);
                     }
-
-                    // Hide loading modal after processing
-                    showLoadingAnimation(false);
                 }
             });
 
             this.on('removedfile', function (file) {
+                // Find the corresponding fileId
+                const fileRow = document.getElementById(file.id);
+                if (fileRow) {
+                    const fileId = fileRow.id;
+                    activeFileIds.delete(fileId);
+                    removeTableRow(file.name);
+                }
+
                 if (file.type === 'application/zip') {
                     // Remove extracted files from the list
                     sampleFiles = sampleFiles.filter(sig => !file.name.includes(sig.name));
@@ -296,16 +304,18 @@ async function processSignature(fileName, sigContent, fileId) {
         // Update progress to 10%
         updateProgressBar(fileId, 10, 'Starting...', 'bg-info');
 
-        // Check if genome and y_chr files are loaded from window
+        // Check if main data is loaded
         if (!window.loadedGenomeSig) {
             alert('Genome file is not loaded. Please load genome data first.');
             updateProgressBar(fileId, 100, 'Failed: Genome not loaded', 'bg-danger');
+            activeFileIds.delete(fileId);
             return;
         }
 
         if (!window.loadedYchrSig) {
             alert('Y Chromosome file is not loaded. Please load Y Chromosome data first.');
             updateProgressBar(fileId, 100, 'Failed: Y Chromosome not loaded', 'bg-danger');
+            activeFileIds.delete(fileId);
             return;
         }
 
@@ -326,26 +336,15 @@ async function processSignature(fileName, sigContent, fileId) {
         // Initialize specificChrsContent
         specificChrsContent = {};
 
-        // Fetch each specific chromosome .sig file
-        const chrPromises = specificChrs.map(async (chr) => {
-            const chrPath = `data/species/${selectedSpecies}/genomes/${selectedGenome}/specific_chrs/${chr}.sig`;
-            try {
-                const response = await fetch(chrPath);
-                if (response.ok) {
-                    const chrSigContent = await response.text();
-                    specificChrsContent[chr] = chrSigContent;
-                    console.log(`Loaded specific chromosome (${chr}):`);
-                } else {
-                    console.error(`Failed to load chromosome file: ${chrPath}. Status: ${response.status} - ${response.statusText}`);
-                }
-            } catch (error) {
-                console.error(`Error fetching specific chromosome (${chr}) from ${chrPath}:`, error);
+        // Populate specificChrsContent from already fetched data
+        specificChrs.forEach(chr => {
+            if (window.specificChrsLoaded && window.specificChrsLoaded[chr]) {
+                specificChrsContent[chr] = window.specificChrsLoaded[chr];
+            } else {
+                console.warn(`Specific chromosome ${chr} not loaded.`);
+                specificChrsContent[chr] = ''; // Or handle as needed
             }
         });
-
-
-        // Await all chromosome fetches
-        await Promise.all(chrPromises);
 
         // Update progress to 40%
         updateProgressBar(fileId, 40, 'Preparing data for processing...', 'bg-info');
@@ -376,12 +375,14 @@ async function processSignature(fileName, sigContent, fileId) {
         } catch (error) {
             console.error('Error serializing data before sending to worker:', error);
             updateProgressBar(fileId, 100, 'Failed: Data serialization error', 'bg-danger');
+            activeFileIds.delete(fileId);
         }
 
     } catch (error) {
         console.error(`Error processing ${fileName}:`, error);
         // Update progress bar to indicate failure
         updateProgressBar(fileId, 100, 'Failed', 'bg-danger');
+        activeFileIds.delete(fileId);
     }
 }
 
@@ -420,7 +421,6 @@ function displayResultsInTable(result, fileId) {
     // Remove the fileId from active files as processing is complete
     activeFileIds.delete(fileId);
 }
-
 
 // Function to export the table as a TSV file
 function exportTableToTSV() {
@@ -566,6 +566,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Event Listener for Load Data Button
     loadDataButton.addEventListener('click', async function () {
+        if (mainDataLoaded) {
+            alert('Main data is already loaded.');
+            return;
+        }
+
         const selectedSpecies = speciesSelect.value;
         const selectedGenome = genomeSelect.value;
         const selectedYchr = ychrSelect.value;
@@ -597,6 +602,30 @@ document.addEventListener('DOMContentLoaded', function () {
             console.log(`Loaded Y Chromosome (${selectedYchr}):`);
             console.log(ychrContent.substring(0, 50)); // Log first 50 characters
 
+            // Fetch Specific Chromosomes
+            const specificChrs = speciesData[selectedSpecies].genomes[selectedGenome].specific_chrs;
+            window.specificChrsLoaded = {};
+
+            const chrPromises = specificChrs.map(async (chr) => {
+                const chrPath = `data/species/${selectedSpecies}/genomes/${selectedGenome}/specific_chrs/${chr}.sig`;
+                try {
+                    const response = await fetch(chrPath);
+                    if (response.ok) {
+                        const chrSigContent = await response.text();
+                        window.specificChrsLoaded[chr] = chrSigContent;
+                        console.log(`Loaded specific chromosome (${chr}):`);
+                    } else {
+                        console.error(`Failed to load chromosome file: ${chrPath}. Status: ${response.status} - ${response.statusText}`);
+                        window.specificChrsLoaded[chr] = ''; // Handle missing chromosome data as needed
+                    }
+                } catch (error) {
+                    console.error(`Error fetching specific chromosome (${chr}) from ${chrPath}:`, error);
+                    window.specificChrsLoaded[chr] = ''; // Handle fetch error
+                }
+            });
+
+            await Promise.all(chrPromises);
+
             // Fetch Amplicon File if selected
             let ampliconContent = null;
             if (ampliconPath) {
@@ -605,8 +634,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     throw new Error(`Amplicon file not found: ${ampliconPath}`);
                 }
                 ampliconContent = await ampliconResponse.text();
-                // console.log(`Loaded Amplicon (${selectedAmplicon}):`);
-                console.log(ampliconContent.substring(0, 50)); // Log first 50 characters
+                console.log(`Loaded Amplicon (${selectedAmplicon}):`);
+                // console.log(ampliconContent.substring(0, 50)); // Log first 50 characters
             }
 
             // Assign fetched contents to global variables
@@ -616,6 +645,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
             logInfo.style.display = 'block';
             logInfo.textContent = `Loaded data for ${selectedSpecies} - ${selectedGenome} - ${selectedYchr}${selectedAmplicon ? ' - ' + selectedAmplicon : ''}`;
+
+            // Mark main data as loaded
+            mainDataLoaded = true;
+
+            // Disable Load Data button to prevent reloading
+            loadDataButton.disabled = true;
+            loadDataButton.textContent = 'Data Loaded';
         } catch (error) {
             console.error('Error loading data files:', error);
             alert(error.message);
@@ -656,6 +692,9 @@ function updateProgressBar(fileId, percentage, statusText, additionalClass = '')
         progressBar.textContent = `${percentage}% - ${statusText}`;
         if (additionalClass) {
             progressBar.className = `progress-bar ${additionalClass}`;
+        } else {
+            // Reset to default if no additional class is provided
+            progressBar.className = 'progress-bar';
         }
     }
 }
