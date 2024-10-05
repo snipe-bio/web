@@ -1466,6 +1466,7 @@ def process_sample(
     # create a signature for the amplicon
     amplicon_sig = Signature(k_size=51, signature_type=SigType.AMPLICON)
     amplicon_sig.load_from_json_string(snipe_amplicon)
+    amplicon_sig._name = "amplicon"
     
     
     
@@ -1600,7 +1601,7 @@ def process_sample(
         sample_sig.calculate_exome_roi("amplicon", 5)
         for fold in [9]:
             n_predict = (fold+1) * 5
-            extra_increase, final_coverage_index = sample_sig.predict_amplicon_roi(amplicon_name="exome", n_predict=n_predict, show_plot=False)
+            extra_increase, final_coverage_index = sample_sig.predict_amplicon_roi(amplicon_name="amplicon", n_predict=n_predict, show_plot=False)
             fold_to_roi_coverage[fold] = final_coverage_index
     
     else:
